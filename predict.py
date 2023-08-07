@@ -21,6 +21,8 @@ from diffusers import (
 MODEL_ID = "mfrashad/chilloutmix_NiPrunedFp32Fix"
 MODEL_CACHE = "diffusers-cache"
 SAFETY_MODEL_ID = "CompVis/stable-diffusion-safety-checker"
+EMBEDDINGS_DIRECTORY = './embeddings'
+LORAS_DIRECTORY = './loras'
 
 class Predictor(BasePredictor):
     def setup(self):
@@ -38,6 +40,9 @@ class Predictor(BasePredictor):
             local_files_only=True,
         ).to("cuda")
 
+        for embedding in os.listdir(EMBEDDINGS_DIRECTORY):
+            self.pipe.load_textual_inversion(os.path.join(EMBEDDINGS_DIRECTORY, embedding))
+
     @torch.inference_mode()
     def predict(
         self,
@@ -52,12 +57,12 @@ class Predictor(BasePredictor):
         width: int = Input(
             description="Width of output image. Maximum size is 1024x768 or 768x1024 because of memory limits",
             choices=[128, 256, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024],
-            default=768,
+            default=512,
         ),
         height: int = Input(
             description="Height of output image. Maximum size is 1024x768 or 768x1024 because of memory limits",
             choices=[128, 256, 384, 448, 512, 576, 640, 704, 768, 832, 896, 960, 1024],
-            default=768,
+            default=512,
         ),
         num_outputs: int = Input(
             description="Number of images to output.",
@@ -86,6 +91,9 @@ class Predictor(BasePredictor):
         seed: int = Input(
             description="Random seed. Leave blank to randomize the seed", default=None
         ),
+        lora: str = Input(
+            description="Lora filename to be used", default=None
+        )
     ) -> List[Path]:
         """Run a single prediction on the model"""
         if seed is None:
@@ -96,8 +104,11 @@ class Predictor(BasePredictor):
             raise ValueError(
                 "Maximum size is 1024x768 or 768x1024 pixels, because of memory limits. Please select a lower width or height."
             )
-
+        
         self.pipe.scheduler = make_scheduler(scheduler, self.pipe.scheduler.config)
+        self.pipe.unload_lora_weights()
+        use_safetensors = True if '.safetensors' in lora else False
+        self.pipe.load_lora_weights(os.path.join(LORAS_DIRECTORY, lora), local_files_only=True, use_safetensors=use_safetensors)
 
         generator = torch.Generator("cuda").manual_seed(seed)
         output = self.pipe(
